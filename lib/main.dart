@@ -1,26 +1,46 @@
+
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'acceleration_cubit.dart';
+import 'database_helper.dart';
+import 'history_page.dart';
 
 void main() {
-  runApp(MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final databaseHelper = DatabaseHelper();
+
+  runApp(
+    BlocProvider(
+      create: (_) => AccelerationCubit(databaseHelper),
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: Text('Лабораторная работа'),
-        ),
-        body: MyHomePage(),
+      debugShowCheckedModeBanner: false,
+      title: 'Расчёт ускорения',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
       ),
+      home: const MyHomePage(),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
+  const MyHomePage({super.key});
+
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  State<MyHomePage> createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
@@ -31,7 +51,55 @@ class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _t = TextEditingController();
 
   bool _agree = false;
-  bool _agreeError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLastValues();
+  }
+
+  Future<void> _loadLastValues() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!mounted) return;
+
+    setState(() {
+      _v0.text = prefs.getString('v0') ?? '';
+      _v.text = prefs.getString('v') ?? '';
+      _t.text = prefs.getString('t') ?? '';
+    });
+  }
+
+  Future<void> _saveLastValues() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString('v0', _v0.text);
+    await prefs.setString('v', _v.text);
+    await prefs.setString('t', _t.text);
+  }
+
+  Future<void> _calculate() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (!_agree) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Необходимо согласиться на обработку данных'),
+        ),
+      );
+      return;
+    }
+
+    await _saveLastValues();
+
+    if (!mounted) return;
+
+    context.read<AccelerationCubit>().calculate(
+          _v0.text,
+          _v.text,
+          _t.text,
+        );
+  }
 
   @override
   void dispose() {
@@ -41,158 +109,214 @@ class _MyHomePageState extends State<MyHomePage> {
     super.dispose();
   }
 
-  void _goToResult() {
-    final formOk = _formKey.currentState!.validate();
-    setState(() {
-      _agreeError = !_agree;
-    });
-
-    if (!formOk || !_agree) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ResultScreen(
-          v0: double.parse(_v0.text),
-          v: double.parse(_v.text),
-          t: double.parse(_t.text),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.all(16.0),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextFormField(
-              controller: _v0,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Начальная скорость v0 (м/с)',
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Введите начальную скорость';
-                }
-                if (double.tryParse(value) == null) {
-                  return 'Введите число';
-                }
-                return null;
-              },
-            ),
-            SizedBox(height: 16),
-
-            TextFormField(
-              controller: _v,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Конечная скорость v (м/с)',
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Введите конечную скорость';
-                }
-                if (double.tryParse(value) == null) {
-                  return 'Введите число';
-                }
-                return null;
-              },
-            ),
-            SizedBox(height: 16),
-
-            TextFormField(
-              controller: _t,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Время t (с)',
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Введите время';
-                }
-                final t = double.tryParse(value);
-                if (t == null) return 'Введите число';
-                if (t <= 0) return 'Время должно быть больше 0';
-                return null;
-              },
-            ),
-            SizedBox(height: 16),
-
-            CheckboxListTile(
-              title: Text('Согласен на обработку данных'),
-              value: _agree,
-              onChanged: (val) {
-                setState(() {
-                  _agree = val ?? false;
-                  _agreeError = false;
-                });
-              },
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-            ),
-            if (_agreeError)
-              Text(
-                'Необходимо согласие на обработку данных',
-                style: TextStyle(color: Colors.red, fontSize: 12),
-              ),
-
-            SizedBox(height: 16),
-
-            ElevatedButton(
-              onPressed: _goToResult,
-              child: Text('Рассчитать'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// второй экран
-class ResultScreen extends StatelessWidget {
-  final double v0;
-  final double v;
-  final double t;
-
-  ResultScreen({required this.v0, required this.v, required this.t});
-
-  @override
-  Widget build(BuildContext context) {
-    final a = (v - v0) / t;
-
     return Scaffold(
       appBar: AppBar(
-        title: Text('Результат'),
+        title: const Text('Расчёт ускорения'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.history),
+          tooltip: 'История расчётов',
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const HistoryPage(),
+              ),
+            );
+          },
+        ),
       ),
-      body: Padding(
-        padding: EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('v0 = $v0 м/с'),
-            Text('v  = $v м/с'),
-            Text('t  = $t с'),
-            SizedBox(height: 16),
-            Text(
-              'Ускорение a = ${a.toStringAsFixed(2)} м/с²',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Назад'),
-            ),
-          ],
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              TextFormField(
+                controller: _v0,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Начальная скорость (м/с)',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Введите начальную скорость';
+                  }
+
+                  if (double.tryParse(
+                        value.trim().replaceAll(',', '.'),
+                      ) ==
+                      null) {
+                    return 'Введите корректное число';
+                  }
+
+                  return null;
+                },
+              ),
+              const SizedBox(height: 15),
+
+              TextFormField(
+                controller: _v,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Конечная скорость (м/с)',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Введите конечную скорость';
+                  }
+
+                  if (double.tryParse(
+                        value.trim().replaceAll(',', '.'),
+                      ) ==
+                      null) {
+                    return 'Введите корректное число';
+                  }
+
+                  return null;
+                },
+              ),
+              const SizedBox(height: 15),
+
+              TextFormField(
+                controller: _t,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Время (с)',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Введите время';
+                  }
+
+                  final time = double.tryParse(
+                    value.trim().replaceAll(',', '.'),
+                  );
+
+                  if (time == null) {
+                    return 'Введите корректное число';
+                  }
+
+                  if (time <= 0) {
+                    return 'Время должно быть больше 0';
+                  }
+
+                  return null;
+                },
+              ),
+              const SizedBox(height: 10),
+
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Согласен на обработку данных',
+                ),
+                value: _agree,
+                onChanged: (value) {
+                  setState(() {
+                    _agree = value ?? false;
+                  });
+                },
+              ),
+
+              const SizedBox(height: 15),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _calculate,
+                  child: const Text('Рассчитать ускорение'),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              BlocBuilder<AccelerationCubit, AccelerationState>(
+                builder: (context, state) {
+                  if (state is AccelerationResult) {
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'Результат расчёта',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+
+                            Text(
+                              'Начальная скорость: ${state.v0} м/с',
+                            ),
+                            Text(
+                              'Конечная скорость: ${state.v} м/с',
+                            ),
+                            Text('Время: ${state.t} с'),
+
+                            const SizedBox(height: 10),
+
+                            Text(
+                              'Ускорение: ${state.a.toStringAsFixed(2)} м/с²',
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+
+                            const SizedBox(height: 10),
+
+                            ElevatedButton(
+                              onPressed: () {
+                                context
+                                    .read<AccelerationCubit>()
+                                    .reset();
+
+                                _v0.clear();
+                                _v.clear();
+                                _t.clear();
+                              },
+                              child: const Text('Новый расчёт'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (state is AccelerationError) {
+                    return Text(
+                      state.message,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 16,
+                      ),
+                    );
+                  }
+
+                  return const SizedBox.shrink();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
